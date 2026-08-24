@@ -2,7 +2,10 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
-import duckdb
+import pandas as pd
+import requests
+from io import BytesIO
+import time
 
 app = FastAPI()
 
@@ -14,11 +17,65 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-con = duckdb.connect()
-con.execute("INSTALL httpfs;")
-con.execute("LOAD httpfs;")
-
-# ... (Your full LANDING_PAGE_HTML and all endpoints remain exactly same)
+# Simple Landing Page (without Three.js to reduce load)
+LANDING_PAGE_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Hitek Data Gateway</title>
+    <style>
+        body {
+            margin: 0;
+            background: #050505;
+            color: #00ffcc;
+            font-family: 'Courier New', monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        .container {
+            text-align: center;
+            padding: 50px;
+            border: 2px solid #00ffcc;
+            border-radius: 15px;
+            background: rgba(0, 0, 0, 0.9);
+            box-shadow: 0 0 50px rgba(0, 255, 204, 0.2);
+        }
+        h1 { font-size: 3em; text-shadow: 0 0 20px #00ffcc; }
+        .status { color: #00ffcc; font-weight: bold; }
+        .blink { animation: blink 1s infinite; }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+        .endpoint {
+            background: #1a1a1a;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 20px;
+            font-size: 0.9em;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 SYSTEM ONLINE</h1>
+        <p>API Gateway: <span class="status">● Active</span></p>
+        <p>Status: <span class="status blink">HTTP 200 OK</span></p>
+        <div class="endpoint">
+            <strong>📡 ENDPOINT:</strong><br>
+            /FetchData?Number=XXXXXXXXXX
+        </div>
+        <p style="margin-top: 30px; font-size: 0.8em; color: #444;">
+            Developer: @Maybechx
+        </p>
+    </div>
+</body>
+</html>
+"""
 
 @app.exception_handler(StarletteHTTPException)
 async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):
@@ -27,7 +84,7 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
             status_code=404,
             content={
                 "status": "rejected",
-                "message": "Invalid endpoint. STRICTLY use /FetchData?Number=XXXXXXXXXX",
+                "message": "Invalid endpoint. Use /FetchData?Number=XXXXXXXXXX",
                 "Developer": "@Maybechx"
             }
         )
@@ -42,55 +99,89 @@ def root_landing_page():
 
 @app.get("/FetchData")
 def fetch_data(Number: str = Query(None)):
-    if not Number or not Number.isdigit() or len(Number) < 10 or len(Number) > 15:
+    # Validation
+    if not Number:
         return JSONResponse(
             status_code=400,
             content={
-                "status": "rejected",
-                "message": "Invalid parameter. STRICTLY use /FetchData?Number=XXXXXXXXXX",
+                "status": "error",
+                "message": "Number parameter required",
+                "usage": "/FetchData?Number=9876543210",
                 "Developer": "@Maybechx"
             }
         )
     
-    last_digit = Number[-1]
-    primary_url = f"https://huggingface.co/datasets/CutehackX/hitek-data-bucket/resolve/main/final_master_shard_{last_digit}.parquet"
-    alt_url = f"https://huggingface.co/datasets/CutehackX/hitek-data-bucket/resolve/main/alt_master_shard_{last_digit}.parquet"
+    if not Number.isdigit():
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "error",
+                "message": "Number must contain only digits",
+                "provided": Number,
+                "Developer": "@Maybechx"
+            }
+        )
+    
+    if len(Number) < 10 or len(Number) > 15:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "error",
+                "message": "Number must be 10-15 digits",
+                "provided": Number,
+                "length": len(Number),
+                "Developer": "@Maybechx"
+            }
+        )
     
     try:
-        query = f"""
-            SELECT *, 'Main' AS _record_type FROM read_parquet('{primary_url}') WHERE mobile = '{Number}'
-            UNION ALL
-            SELECT *, 'Alt' AS _record_type FROM read_parquet('{alt_url}') WHERE alt = '{Number}'
-        """
+        last_digit = Number[-1]
+        results = []
         
-        raw_results = con.execute(query).df().to_dict(orient="records")
+        # Try Primary Shard
+        primary_url = f"https://huggingface.co/datasets/CutehackX/hitek-data-bucket/resolve/main/final_master_shard_{last_digit}.parquet"
         
-        main_records = []
-        alt_records = []
+        try:
+            response = requests.get(primary_url, timeout=30)
+            if response.status_code == 200:
+                df = pd.read_parquet(BytesIO(response.content))
+                if 'mobile' in df.columns:
+                    main_result = df[df['mobile'].astype(str) == Number]
+                    if not main_result.empty:
+                        results.extend(main_result.to_dict(orient="records"))
+        except Exception as e:
+            print(f"Primary shard error: {e}")
         
-        for row in raw_results:
-            rec_type = row.pop('_record_type')
-            if rec_type == 'Main':
-                main_records.append(row)
-            else:
-                alt_records.append(row)
+        # Try Alt Shard
+        alt_url = f"https://huggingface.co/datasets/CutehackX/hitek-data-bucket/resolve/main/alt_master_shard_{last_digit}.parquet"
         
-        if not main_records and not alt_records:
+        try:
+            response = requests.get(alt_url, timeout=30)
+            if response.status_code == 200:
+                df = pd.read_parquet(BytesIO(response.content))
+                if 'alt' in df.columns:
+                    alt_result = df[df['alt'].astype(str) == Number]
+                    if not alt_result.empty:
+                        results.extend(alt_result.to_dict(orient="records"))
+        except Exception as e:
+            print(f"Alt shard error: {e}")
+        
+        if not results:
             return JSONResponse(
                 status_code=404,
                 content={
-                    "status": "not_found", 
+                    "status": "not_found",
                     "phone": Number,
+                    "message": "Number not found in database",
                     "Developer": "@Maybechx"
                 }
             )
-            
+        
         return {
-            "status": "success", 
-            "Data": {
-                "Main_Records": main_records,
-                "Alt_Records": alt_records
-            },
+            "status": "success",
+            "phone": Number,
+            "records_found": len(results),
+            "data": results,
             "Developer": "@Maybechx"
         }
         
@@ -99,7 +190,7 @@ def fetch_data(Number: str = Query(None)):
             status_code=500,
             content={
                 "status": "error",
-                "message": f"Database processing error: {str(e)}",
+                "message": f"Processing error: {str(e)}",
                 "Developer": "@Maybechx"
             }
         )
