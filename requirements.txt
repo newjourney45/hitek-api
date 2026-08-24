@@ -1,5 +1,4 @@
-fastapi==0.104.1
-uvicorn==0.24.0
-duckdb==0.10.0
-pandas==2.1.3
-mangum==0.17.0
+fastapi
+uvicorn
+duckdb
+pandas
