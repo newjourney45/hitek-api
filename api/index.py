@@ -17,7 +17,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Simple Landing Page (without Three.js to reduce load)
+# Simple Landing Page
 LANDING_PAGE_HTML = """
 <!DOCTYPE html>
 <html>
@@ -58,6 +58,12 @@ LANDING_PAGE_HTML = """
             font-size: 0.9em;
             color: #888;
         }
+        .developer {
+            margin-top: 30px;
+            color: #00ffcc;
+            font-weight: bold;
+            font-size: 1.2em;
+        }
     </style>
 </head>
 <body>
@@ -69,9 +75,7 @@ LANDING_PAGE_HTML = """
             <strong>📡 ENDPOINT:</strong><br>
             /FetchData?Number=XXXXXXXXXX
         </div>
-        <p style="margin-top: 30px; font-size: 0.8em; color: #444;">
-            Developer: @Maybechx
-        </p>
+        <div class="developer">👨‍💻 Developer: @SOCIALBANNERR</div>
     </div>
 </body>
 </html>
@@ -85,12 +89,12 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
             content={
                 "status": "rejected",
                 "message": "Invalid endpoint. Use /FetchData?Number=XXXXXXXXXX",
-                "Developer": "@Maybechx"
+                "Developer": "@SOCIALBANNERR"
             }
         )
     return JSONResponse(
         status_code=exc.status_code,
-        content={"detail": exc.detail, "Developer": "@Maybechx"}
+        content={"detail": exc.detail, "Developer": "@SOCIALBANNERR"}
     )
 
 @app.get("/", response_class=HTMLResponse)
@@ -107,7 +111,7 @@ def fetch_data(Number: str = Query(None)):
                 "status": "error",
                 "message": "Number parameter required",
                 "usage": "/FetchData?Number=9876543210",
-                "Developer": "@Maybechx"
+                "Developer": "@SOCIALBANNERR"
             }
         )
     
@@ -118,7 +122,7 @@ def fetch_data(Number: str = Query(None)):
                 "status": "error",
                 "message": "Number must contain only digits",
                 "provided": Number,
-                "Developer": "@Maybechx"
+                "Developer": "@SOCIALBANNERR"
             }
         )
     
@@ -130,41 +134,55 @@ def fetch_data(Number: str = Query(None)):
                 "message": "Number must be 10-15 digits",
                 "provided": Number,
                 "length": len(Number),
-                "Developer": "@Maybechx"
+                "Developer": "@SOCIALBANNERR"
             }
         )
     
     try:
         last_digit = Number[-1]
         results = []
+        found_in = []
         
-        # Try Primary Shard
+        # ===== PRIMARY SHARD =====
         primary_url = f"https://huggingface.co/datasets/CutehackX/hitek-data-bucket/resolve/main/final_master_shard_{last_digit}.parquet"
-        
         try:
             response = requests.get(primary_url, timeout=30)
             if response.status_code == 200:
                 df = pd.read_parquet(BytesIO(response.content))
-                if 'mobile' in df.columns:
-                    main_result = df[df['mobile'].astype(str) == Number]
-                    if not main_result.empty:
-                        results.extend(main_result.to_dict(orient="records"))
+                # Check all possible columns
+                for col in df.columns:
+                    if df[col].dtype in ['int64', 'object']:
+                        try:
+                            result = df[df[col].astype(str) == Number]
+                            if not result.empty:
+                                results.extend(result.to_dict(orient="records"))
+                                found_in.append(f"primary_shard_{last_digit}_column_{col}")
+                                break
+                        except:
+                            pass
         except Exception as e:
-            print(f"Primary shard error: {e}")
+            print(f"Primary shard {last_digit} error: {e}")
         
-        # Try Alt Shard
-        alt_url = f"https://huggingface.co/datasets/CutehackX/hitek-data-bucket/resolve/main/alt_master_shard_{last_digit}.parquet"
-        
-        try:
-            response = requests.get(alt_url, timeout=30)
-            if response.status_code == 200:
-                df = pd.read_parquet(BytesIO(response.content))
-                if 'alt' in df.columns:
-                    alt_result = df[df['alt'].astype(str) == Number]
-                    if not alt_result.empty:
-                        results.extend(alt_result.to_dict(orient="records"))
-        except Exception as e:
-            print(f"Alt shard error: {e}")
+        # ===== ALT SHARD =====
+        if not results:  # Only check alt if not found in primary
+            alt_url = f"https://huggingface.co/datasets/CutehackX/hitek-data-bucket/resolve/main/alt_master_shard_{last_digit}.parquet"
+            try:
+                response = requests.get(alt_url, timeout=30)
+                if response.status_code == 200:
+                    df = pd.read_parquet(BytesIO(response.content))
+                    # Check all possible columns
+                    for col in df.columns:
+                        if df[col].dtype in ['int64', 'object']:
+                            try:
+                                result = df[df[col].astype(str) == Number]
+                                if not result.empty:
+                                    results.extend(result.to_dict(orient="records"))
+                                    found_in.append(f"alt_shard_{last_digit}_column_{col}")
+                                    break
+                            except:
+                                pass
+            except Exception as e:
+                print(f"Alt shard {last_digit} error: {e}")
         
         if not results:
             return JSONResponse(
@@ -173,7 +191,8 @@ def fetch_data(Number: str = Query(None)):
                     "status": "not_found",
                     "phone": Number,
                     "message": "Number not found in database",
-                    "Developer": "@Maybechx"
+                    "checked_shards": [f"final_{last_digit}", f"alt_{last_digit}"],
+                    "Developer": "@SOCIALBANNERR"
                 }
             )
         
@@ -181,8 +200,9 @@ def fetch_data(Number: str = Query(None)):
             "status": "success",
             "phone": Number,
             "records_found": len(results),
+            "found_in": found_in,
             "data": results,
-            "Developer": "@Maybechx"
+            "Developer": "@SOCIALBANNERR"
         }
         
     except Exception as e:
@@ -191,6 +211,78 @@ def fetch_data(Number: str = Query(None)):
             content={
                 "status": "error",
                 "message": f"Processing error: {str(e)}",
-                "Developer": "@Maybechx"
+                "Developer": "@SOCIALBANNERR"
             }
         )
+
+# ===== DEBUG ENDPOINT =====
+@app.get("/Debug/CheckNumber/{number}")
+def debug_check_number(number: str):
+    """Check if a number exists and show data structure"""
+    if not number.isdigit():
+        return {"error": "Number must be digits"}
+    
+    last_digit = number[-1]
+    results = {}
+    
+    # Check Primary
+    primary_url = f"https://huggingface.co/datasets/CutehackX/hitek-data-bucket/resolve/main/final_master_shard_{last_digit}.parquet"
+    try:
+        response = requests.get(primary_url, timeout=30)
+        if response.status_code == 200:
+            df = pd.read_parquet(BytesIO(response.content))
+            results['primary'] = {
+                "columns": df.columns.tolist(),
+                "sample": df.head(2).to_dict(orient="records"),
+                "total_rows": len(df)
+            }
+            
+            # Search for number
+            for col in df.columns:
+                if df[col].dtype in ['int64', 'object']:
+                    try:
+                        result = df[df[col].astype(str) == number]
+                        if not result.empty:
+                            results['primary_found'] = {
+                                "column": col,
+                                "data": result.to_dict(orient="records")
+                            }
+                            break
+                    except:
+                        pass
+    except Exception as e:
+        results['primary_error'] = str(e)
+    
+    # Check Alt
+    alt_url = f"https://huggingface.co/datasets/CutehackX/hitek-data-bucket/resolve/main/alt_master_shard_{last_digit}.parquet"
+    try:
+        response = requests.get(alt_url, timeout=30)
+        if response.status_code == 200:
+            df = pd.read_parquet(BytesIO(response.content))
+            results['alt'] = {
+                "columns": df.columns.tolist(),
+                "sample": df.head(2).to_dict(orient="records"),
+                "total_rows": len(df)
+            }
+            
+            # Search for number
+            for col in df.columns:
+                if df[col].dtype in ['int64', 'object']:
+                    try:
+                        result = df[df[col].astype(str) == number]
+                        if not result.empty:
+                            results['alt_found'] = {
+                                "column": col,
+                                "data": result.to_dict(orient="records")
+                            }
+                            break
+                    except:
+                        pass
+    except Exception as e:
+        results['alt_error'] = str(e)
+    
+    results['developer'] = "@SOCIALBANNERR"
+    return results
+
+from mangum import Mangum
+handler = Mangum(app)
