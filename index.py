@@ -120,8 +120,11 @@ def fetch_data():
     
     last_digit = number[-1]
     
-    primary_url = f"https://huggingface.co/buckets/CutehackX/hitek-data-bucket/resolve/main/final_master_shard_{last_digit}.parquet"
-    alt_url = f"https://huggingface.co/buckets/CutehackX/hitek-data-bucket/resolve/main/alt_master_shard_{last_digit}.parquet"
+    # UPDATED BUCKET URL - New bucket path
+    base_url = "https://huggingface.co/datasets/CutehackX/hitek-data-bucket/resolve/main"
+    
+    primary_url = f"{base_url}/final_master_shard_{last_digit}.parquet"
+    alt_url = f"{base_url}/alt_master_shard_{last_digit}.parquet"
     
     try:
         query = f"""
