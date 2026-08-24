@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, render_template_string
 import duckdb
+import os
 
 app = Flask(__name__)
 
@@ -120,9 +121,8 @@ def fetch_data():
     
     last_digit = number[-1]
     
-    # UPDATED BUCKET URL - New bucket path
+    # Updated bucket URL
     base_url = "https://huggingface.co/datasets/CutehackX/hitek-data-bucket/resolve/main"
-    
     primary_url = f"{base_url}/final_master_shard_{last_digit}.parquet"
     alt_url = f"{base_url}/alt_master_shard_{last_digit}.parquet"
     
@@ -133,7 +133,6 @@ def fetch_data():
             SELECT *, 'Alt' AS _record_type FROM read_parquet('{alt_url}') WHERE alt = '{number}'
         """
         
-        # Execute Query and convert to list of dicts
         raw_results = con.execute(query).df().to_dict(orient="records")
         
         main_records = []
@@ -169,5 +168,6 @@ def fetch_data():
             "Developer": "@rajanhackerd"
         }), 500
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000, debug=True)
+# This is the important part - for Vercel
+# Remove the if __name__ == "__main__" block entirely
+# Vercel will import 'app' directly
